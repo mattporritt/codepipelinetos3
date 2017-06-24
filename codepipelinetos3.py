@@ -28,6 +28,20 @@ def setup_s3_client(job_data):
     return session.client('s3', config=botocore.client.Config(signature_version='s3v4'))
 
 
+def upload_to_s3(archivefile, s3bucket):
+    """
+    Given a source zip file location and an S3 Bucket name,
+    extract files out of the zip with path and upload
+    them to the s3 bucket.
+    """
+
+    archive = zipfile.ZipFile(archivefile)
+    uploads3 = boto3.client('s3')
+    for archivefile in archive.namelist():
+        with archive.open(archivefile) as data:
+            uploads3.upload_fileobj(data, s3bucket, archivefile)
+
+
 def lambda_handler(event, context):
     """
     lambda_handler is the entry point that is invoked when the lambda function is called,
@@ -56,12 +70,8 @@ def lambda_handler(event, context):
     s3 = setup_s3_client(jobdata)
     s3.download_file(bucketname, objectkey, tempzipfile.name)
 
-    # TODO: make this it's own method.
-    archive = zipfile.ZipFile(tempzipfile.name)
-    uploads3 = boto3.client('s3')
-    for archivefile in archive.namelist():
-        with archive.open(archivefile) as data:
-            uploads3.upload_fileobj(data, statics3, archivefile)
+    # Upload the zip files to the static site S3 bucket
+    upload_to_s3(tempzipfile.name, statics3)
 
     # Return success result of the operation to the Codepipeline instance
     # This needs to be done explicitly.
