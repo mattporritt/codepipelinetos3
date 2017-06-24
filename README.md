@@ -7,15 +7,6 @@ This Lambda function leverages AWS Codepipeline to update the static content in 
 
 This will work with either GitHub or AWS Codecommit as the Git repository.
 
-## Why not a trigger instead?
-
-Both AWS Codecommit and GitHub support 'triggers'. When certain actions such as a push to a branch are done, external webservices can be invoked. In theory you could use a trigger coupled with associated services to update your S3 bucket instead of Codepipeline. However, you would still need to use Lambda. Instead of using AWS Codepipeline, you would use the AWS API Gateway service. The Git trigger would call the API Gateway which would then trigger an AWS Lambda function. 
-
-In this scenario the Lambda function would
-
-
-First step to CI
-
 ## Setup
 
 ### Prerequisites
@@ -26,3 +17,4 @@ The following will need to be setup before you can use this Lambda function to u
 * A static hosted website in S3 
 
 ### Setup Codepipeline
+The AWS documentation outlines how to setup Codepipeline to interface with a Git repository and Lambda: http://docs.aws.amazon.com/codepipeline/latest/userguide/actions-invoke-lambda-function.html
