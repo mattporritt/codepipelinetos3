@@ -8,6 +8,9 @@ import botocore
 import json
 import zipfile
 import tempfile
+import shutil
+import subprocess
+import traceback
 
 
 def setup_s3_client(job_data):
@@ -67,18 +70,17 @@ def get_static_bucket(jobdata):
     return decoded_parameters['staticS3']
 
 
-def upload_to_s3(archivefile, s3bucket):
+def upload_to_s3(sourcedir, s3bucket):
     """
     Given a source zip file location and an S3 Bucket name,
     extract files out of the zip with path and upload
     them to the s3 bucket.
     """
 
-    archive = zipfile.ZipFile(archivefile)
-    uploads3 = boto3.client('s3')
-    for archivefile in archive.namelist():
-        with archive.open(archivefile) as data:
-            uploads3.upload_fileobj(data, s3bucket, archivefile)
+    command = ["./aws", "s3", "sync", "--acl", "public-read", "--delete",
+               sourcedir + "/", "s3://" + s3bucket + "/"]
+    print(command)
+    print(subprocess.check_output(command, stderr=subprocess.STDOUT))
 
 
 def lambda_handler(event, context):
@@ -98,6 +100,7 @@ def lambda_handler(event, context):
     bucketname = location['bucketName']
     objectkey = location['objectKey']
     statics3 = get_static_bucket(jobdata)
+    sourcedir = tempfile.mkdtemp()
 
     # Create a temp file to store the artifact zip of the site code to.
     # Each Lambda function has 500MB of temp file storage available to it.
@@ -107,10 +110,14 @@ def lambda_handler(event, context):
     # Download the input artifact zip file containing the site code from the Git repository.
     # The artifact S3 bucket uses SSE so we need a more complicated client setup to access it.
     s3 = setup_s3_client(jobdata)
-    s3.download_file(bucketname, objectkey, tempzipfile.name)
+    
+    with tempfile.NamedTemporaryFile() as tmpfile:
+        s3.download_file(bucketname, objectkey, tempzipfile.name)
+        with zipfile.ZipFile(tmpfile.name, 'r') as zip:
+            zip.extractall(sourcedir)
 
     # Upload the zip files to the static site S3 bucket
-    upload_to_s3(tempzipfile.name, statics3)
+    upload_to_s3(sourcedir, statics3)
 
     # Return success result of the operation to the Codepipeline instance
     # This needs to be done explicitly.
