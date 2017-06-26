@@ -8,9 +8,8 @@ import botocore
 import json
 import zipfile
 import tempfile
-import shutil
-import subprocess
-import traceback
+import os
+import mimetypes
 
 
 def setup_s3_client(job_data):
@@ -72,15 +71,31 @@ def get_static_bucket(jobdata):
 
 def upload_to_s3(sourcedir, s3bucket):
     """
-    Given a source zip file location and an S3 Bucket name,
-    extract files out of the zip with path and upload
-    them to the s3 bucket.
+    Given a source extracted files location and an S3 Bucket name,
+    upload the files to the s3 bucket.
     """
 
-    command = ["./aws", "s3", "sync", "--acl", "public-read", "--delete",
-               sourcedir + "/", "s3://" + s3bucket + "/"]
-    print(command)
-    print(subprocess.check_output(command, stderr=subprocess.STDOUT))
+    uploads3 = boto3.client('s3')
+
+    # Get the relative names and paths of all the files that were
+    # extracted from the zip file.
+    files = [os.path.relpath(os.path.join(dirpath, file), sourcedir)
+             for (dirpath, dirnames, filenames) in os.walk(sourcedir)
+             for file in filenames]
+
+    for uploadfile in files:
+        tmplocation = sourcedir + '/' + uploadfile
+
+        # Get the mime type for the file before we upload it to S3
+        # For an epically silly reason the BOTO library does not preserve
+        # the mimetypes of files uplaoded to S3.
+        # If the mimetype of the file is not correctly set static website hosting does not work.
+        mime = (mimetypes.guess_type(tmplocation, strict=False))[0]
+        if mime is None:
+            mime = 'binary/octet-stream'
+
+        # upload file to S3
+        uploads3.upload_file(tmplocation, s3bucket, uploadfile, ExtraArgs={'ContentType': mime})
 
 
 def lambda_handler(event, context):
@@ -102,21 +117,17 @@ def lambda_handler(event, context):
     statics3 = get_static_bucket(jobdata)
     sourcedir = tempfile.mkdtemp()
 
-    # Create a temp file to store the artifact zip of the site code to.
-    # Each Lambda function has 500MB of temp file storage available to it.
-    tempzipfile = tempfile.NamedTemporaryFile(delete=False)
-    tempzipfile.close()
-
     # Download the input artifact zip file containing the site code from the Git repository.
     # The artifact S3 bucket uses SSE so we need a more complicated client setup to access it.
+    # Once the zip archive has been downloaded extract it to a temporary directory.
     s3 = setup_s3_client(jobdata)
-    
-    with tempfile.NamedTemporaryFile() as tmpfile:
-        s3.download_file(bucketname, objectkey, tempzipfile.name)
-        with zipfile.ZipFile(tmpfile.name, 'r') as zip:
-            zip.extractall(sourcedir)
 
-    # Upload the zip files to the static site S3 bucket
+    with tempfile.NamedTemporaryFile() as tmpfile:
+        s3.download_file(bucketname, objectkey, tmpfile.name)
+        with zipfile.ZipFile(tmpfile.name, 'r') as zipper:
+            zipper.extractall(sourcedir)
+
+    # Upload the extracted files to the static site S3 bucket
     upload_to_s3(sourcedir, statics3)
 
     # Return success result of the operation to the Codepipeline instance
